@@ -1,3 +1,4 @@
+import json
 import enum
 
 import requests
@@ -25,10 +26,31 @@ class ApiHH:
     def uri_dictionaries(self):
         return self.uri + 'dictionaries'
 
+    @property
+    def uri_areas(self):
+        return self.uri + 'areas'
+
+    def get_areas(self):
+        params = {'locale': 'RU'}
+        result = requests.get(self.uri_areas, headers=self.headers, params=params)
+        country_russia = 'Россия'
+        if result.status_code == 200:
+            result_json = result.json()
+            for country in result_json:
+                if country['name'] == country_russia:
+                    return country['areas']
+            else:
+                raise ValueError(f'No country with name {country_russia}')
+        else:
+            raise ValueError(f'Error getting dictionaries: {result.status_code = }, {result.text}')
+
     def get_dictionaries(self):
         result = requests.get(self.uri_dictionaries, headers=self.headers)
-        result_json = result.json()
-        return result_json
+        if result.status_code == 200:
+            result_json = result.json()
+            return result_json
+        else:
+            raise ValueError(f'Error getting dictionaries: {result.status_code = }, {result.text}')
 
     def get_experience(self, name: str) -> str:
         name = Experience(name).value
@@ -39,16 +61,49 @@ class ApiHH:
         else:
             print(f'Experience not found in list: {str(experience_list)}')
 
-    def get_vacancies(self) -> dict:
-        vacancies_filter = {
+    def get_vacancies(self, query_filter: dict) -> dict:
+        result = requests.get(self.uri_vacancies, params=query_filter, headers=self.headers)
+        if result.status_code == 200:
+            result_json = result.json()
+            return result_json
+        else:
+            print(f'Error getting vacancies: {result.status_code = }, {result.text}')
+            return {}
+
+    def find_area_id(self, city: str) -> str:
+        areas = self.get_areas()
+        for area in areas:
+            if area['name'] == city:
+                return area['id']
+        else:
+            raise ValueError(f'No city with name {city}')
+
+    def parse_vacancies(self):
+        filter_city = 'Москва'
+        filter_experience = 'От 3 до 6 лет'
+        query_filter = {
             'text': 'Python',
-            'experience': self.get_experience('От 3 до 6 лет')
+            'area': self.find_area_id(filter_city),
+            'experience': self.get_experience(filter_experience),
+            'per_page': 100,
+            'page': 0
         }
-        result = requests.get(self.uri_vacancies, params=vacancies_filter, headers=self.headers)
-        result_json = result.json()
-        return result_json
+        result = []
+        while True:
+            vacancies_page_result = self.get_vacancies(query_filter)
+            pages = vacancies_page_result['pages']
+            if query_filter['page'] == pages - 1:
+                return result
+            else:
+                query_filter['page'] += 1
+                result += vacancies_page_result['items']
+
+    def write_vacancies(self, vacancies_list: list[dict], filename: str):
+        with open(filename, 'w') as f:
+            f.write(json.dumps(vacancies_list))
 
 
 if __name__ == '__main__':
     api = ApiHH()
-    print(api.get_vacancies())
+    vacancies = api.parse_vacancies()
+    api.write_vacancies(vacancies, 'vacancies.json')
