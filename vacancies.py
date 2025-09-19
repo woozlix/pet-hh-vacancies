@@ -17,45 +17,47 @@ class Experience(enum.Enum):
 
 
 class ApiHH:
+    """Класс для работы с API hh.ru"""
+    BASE_URI = "https://api.hh.ru"
+    DEFAULT_HEADERS = {
+        "User-Agent": "hh-parser/2.0 (test@mail.ru)",
+    }
+    REQUEST_DELAY = 0.5
+
     def __init__(self):
-        self.uri = "https://api.hh.ru/"
-        self.headers = {
-            "User-Agent": "hh-parser/2.0 (test@mail.ru)",
-        }
+        self.session = requests.Session()
+        self.session.headers.update(self.DEFAULT_HEADERS)
+        self._dictionaries_cache = None
+        self._areas_cache = None
 
-    @property
-    def uri_vacancies(self):
-        return self.uri + 'vacancies'
+    def get_areas(self, country_name):
+        if self._areas_cache:
+            return self._areas_cache
 
-    @property
-    def uri_dictionaries(self):
-        return self.uri + 'dictionaries'
+        try:
+            params = {'locale': 'RU'}
+            result = self.session.get(f'{self.BASE_URI}/areas', params=params)
+            result.raise_for_status()
 
-    @property
-    def uri_areas(self):
-        return self.uri + 'areas'
-
-    def get_areas(self):
-        params = {'locale': 'RU'}
-        result = requests.get(self.uri_areas, headers=self.headers, params=params)
-        country_russia = 'Россия'
-        if result.status_code == 200:
             result_json = result.json()
             for country in result_json:
-                if country['name'] == country_russia:
-                    return country['areas']
-            else:
-                raise ValueError(f'No country with name {country_russia}')
-        else:
-            raise ValueError(f'Error getting dictionaries: {result.status_code = }, {result.text}')
+                if country['name'] == country_name:
+                    self._areas_cache = country['areas']
+                    return self._areas_cache
+        except requests.exceptions.RequestException as e:
+            logging.error(f'Error getting areas: {e}')
+            raise
 
     def get_dictionaries(self):
-        result = requests.get(self.uri_dictionaries, headers=self.headers)
-        if result.status_code == 200:
-            result_json = result.json()
-            return result_json
-        else:
-            raise ValueError(f'Error getting dictionaries: {result.status_code = }, {result.text}')
+        if self._dictionaries_cache:
+            return self._dictionaries_cache
+        try:
+            result = self.session.get(f'{self.BASE_URI}/dictionaries')
+            result.raise_for_status()
+            self._dictionaries_cache = result.json()
+            return self._dictionaries_cache
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f'Error getting dictionaries: {e}')
 
     def get_experience(self, name: str) -> str:
         name = Experience(name).value
@@ -67,7 +69,7 @@ class ApiHH:
             raise ValueError(f'Experience not found in list: {str(experience_list)}')
 
     def get_vacancies(self, query_filter: dict) -> dict:
-        result = requests.get(self.uri_vacancies, params=query_filter, headers=self.headers)
+        result = requests.get(self.uri_vacancies, params=query_filter, headers=self.DEFAULT_HEADERS)
         if result.status_code == 200:
             logging.debug(f'Request to {self.uri_vacancies} OK')
             result_json = result.json()
@@ -119,5 +121,5 @@ class ApiHH:
 
 if __name__ == '__main__':
     api = ApiHH()
-    vacancies = api.parse_vacancies()
-    api.write_vacancies(vacancies, 'vacancies.json')
+    # vacancies = api.parse_vacancies()
+    # api.write_vacancies(vacancies, 'vacancies.json')
