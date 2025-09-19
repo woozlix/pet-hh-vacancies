@@ -1,6 +1,7 @@
 import json
 import enum
 import logging
+import time
 
 import requests
 
@@ -69,17 +70,17 @@ class ApiHH:
             raise ValueError(f'Experience not found in list: {str(experience_list)}')
 
     def get_vacancies(self, query_filter: dict) -> dict:
-        result = requests.get(self.uri_vacancies, params=query_filter, headers=self.DEFAULT_HEADERS)
-        if result.status_code == 200:
-            logging.debug(f'Request to {self.uri_vacancies} OK')
+        try:
+            result = self.session.get(f'{self.BASE_URI}/vacancies', params=query_filter)
+            result.raise_for_status()
             result_json = result.json()
             return result_json
-        else:
-            logging.error(f'Error getting vacancies: {result.status_code = }, {result.text}')
-            return {}
+        except requests.exceptions.RequestException as e:
+            logging.error(f'Error getting vacancies: {e}')
+            raise
 
-    def find_area_id(self, city: str) -> str:
-        areas = self.get_areas()
+    def find_area_id(self, country_name: str, city: str) -> str:
+        areas = self.get_areas(country_name)
         for area in areas:
             if area['name'] == city:
                 return area['id']
@@ -88,11 +89,12 @@ class ApiHH:
 
     def parse_vacancies(self):
         logging.info('Started parsing hh.ru')
+        filter_country = 'Россия'
         filter_city = 'Москва'
         filter_experience = 'От 3 до 6 лет'
         query_filter = {
             'text': 'Python',
-            'area': self.find_area_id(filter_city),
+            'area': self.find_area_id(filter_country, filter_city),
             'experience': self.get_experience(filter_experience),
             'per_page': 100,
             'page': 0
@@ -104,6 +106,7 @@ class ApiHH:
         result = []
         while True:
             vacancies_page_result = self.get_vacancies(query_filter)
+            time.sleep(0.5)
             pages = vacancies_page_result['pages']
             if query_filter['page'] == pages - 1:
                 logging.info(f'Got all pages of vacancies.')
@@ -111,6 +114,12 @@ class ApiHH:
             else:
                 query_filter['page'] += 1
                 result += vacancies_page_result['items']
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.session.close()
 
     @staticmethod
     def write_vacancies(vacancies_list: list[dict], filename: str):
@@ -120,6 +129,6 @@ class ApiHH:
 
 
 if __name__ == '__main__':
-    api = ApiHH()
-    # vacancies = api.parse_vacancies()
-    # api.write_vacancies(vacancies, 'vacancies.json')
+    with ApiHH() as api:
+        vacancies = api.parse_vacancies()
+        api.write_vacancies(vacancies, 'vacancies.json')
